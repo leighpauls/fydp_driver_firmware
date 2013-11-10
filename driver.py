@@ -1,10 +1,16 @@
 #!/usr/bin/env python
 
-import serial, threading, time, signal, sys
+import serial, threading
+import time, signal, sys
+import socket
 
 BAUD_RATE = 9600
 SERIAL_READ_TIMEOUT = 1.0
-SPEED_LOW_PASS_ALPHA = 0.5 # HACK: use kalmen filter
+SPEED_DIFF_PERIOD = 0.2
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+def sendSpeedUpdate(speedString):
+    sock.sendto(speedString + "\n", ("0.0.0.0", 4321))
 
 class SerialDriver(threading.Thread):
     def __init__(self, tty):
@@ -13,25 +19,25 @@ class SerialDriver(threading.Thread):
         self.done = False
         self.doneSignal = threading.Condition()
         self.start()
-        self.cur_speed = 0.0
 
     def run(self):
         self.doneSignal.acquire()
         try:
-            count = 0
+            stepQueue = []
             while not self.done:
                 data = self.port.readline()
-                if len(data) <= 2:
+                curTime = time.time()
+                if len(data) == 0:
                     continue
-
-                try:
-                    cur_count = int(data)
-                except:
-                    continue
-
-                self.cur_speed = self.cur_speed * (1 - SPEED_LOW_PASS_ALPHA) \
-                    + SPEED_LOW_PASS_ALPHA * cur_count
-                print "{:4.2f}".format(self.cur_speed * 100).rjust(10)
+                if data[0] == 'c':
+                    stepQueue.append(curTime)
+                elif data[0] == 'n':
+                    None
+                while (len(stepQueue) > 0 and 
+                       stepQueue[0] < curTime - SPEED_DIFF_PERIOD):
+                    stepQueue = stepQueue[1:]
+                speed = float(len(stepQueue)) / SPEED_DIFF_PERIOD
+                sendSpeedUpdate(str(speed))
         finally:
             self.port.close()
             self.doneSignal.release()
@@ -45,7 +51,6 @@ class SerialDriver(threading.Thread):
 not_killed = True
 
 def run_driver(tty):
-
     driver = SerialDriver(tty)
     def signal_handler(signum, frame):
         driver.kill()
