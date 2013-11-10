@@ -4,6 +4,7 @@ import serial, threading, time, signal, sys
 
 BAUD_RATE = 9600
 SERIAL_READ_TIMEOUT = 1.0
+SPEED_LOW_PASS_ALPHA = 0.5 # HACK: use kalmen filter
 
 class SerialDriver(threading.Thread):
     def __init__(self, tty):
@@ -12,6 +13,7 @@ class SerialDriver(threading.Thread):
         self.done = False
         self.doneSignal = threading.Condition()
         self.start()
+        self.cur_speed = 0.0
 
     def run(self):
         self.doneSignal.acquire()
@@ -19,14 +21,17 @@ class SerialDriver(threading.Thread):
             count = 0
             while not self.done:
                 data = self.port.readline()
-                if len(data) == 0:
-                    done = True
-                elif data[0] == 'n':
-                    count += 1
-                elif data[0] == 'c':
-                    print count
-                    count = 0
+                if len(data) <= 2:
+                    continue
 
+                try:
+                    cur_count = int(data)
+                except:
+                    continue
+
+                self.cur_speed = self.cur_speed * (1 - SPEED_LOW_PASS_ALPHA) \
+                    + SPEED_LOW_PASS_ALPHA * cur_count
+                print "{:4.2f}".format(self.cur_speed * 100).rjust(10)
         finally:
             self.port.close()
             self.doneSignal.release()
